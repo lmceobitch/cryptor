@@ -60,4 +60,4 @@ For example, "-l 100" requests a code with 100 characters. Extra characters are 
 
 Important
 
-Use AES mode for real data. The custom mode is only for learning and should not be used to protect sensitive information, but idk who would use that in a random github tool so cool , i hope it will be of use and i like it very much, and you need the password to decrypt a message .
+Use AES mode for real data. The custom mode is only for learning and should not be used to protect real personal stuff, but idk who would use that in a random github tool so cool , i hope it will be of use and i like it very much, and you NEED the password to decrypt a message .
