@@ -17,14 +17,12 @@ except ImportError:
 MAGIC_HEADER = b"CRX2"
 AES_HEADER = b"AES2"
 
-# Scrypt parameters (Memory-hard key derivation)
-SCRYPT_N = 32768  # CPU/Memory cost (2^15)
-SCRYPT_R = 8      # Block size
-SCRYPT_P = 1      # Parallelization factor
+SCRYPT_N = 32768
+SCRYPT_R = 8
+SCRYPT_P = 1
 
-
+# it derives cryptographic keys from a password using Scrypt how cool`
 def _derive_keys(password: str, salt: bytes, key_len: int = 64) -> bytes:
-    """Uses scrypt KDF to derive cryptographically strong master keys resistant to GPU cracking."""
     return hashlib.scrypt(
         password.encode("utf-8"),
         salt=salt,
@@ -36,7 +34,6 @@ def _derive_keys(password: str, salt: bytes, key_len: int = 64) -> bytes:
 
 
 def _generate_csprng_bytes(key: bytes, length: int) -> bytes:
-    """Derives deterministic keystream/CSPRNG bytes using HMAC-SHA256 in counter mode."""
     stream = bytearray()
     counter = 0
     while len(stream) < length:
@@ -47,10 +44,9 @@ def _generate_csprng_bytes(key: bytes, length: int) -> bytes:
 
 
 def _substitution_table(sub_key: bytes) -> list[int]:
-    """Generates a Fisher-Yates shuffled substitution table using HMAC CSPRNG."""
     table = list(range(256))
     random_bytes = _generate_csprng_bytes(sub_key, 256 * 4)
-    
+
     for i in range(255, 0, -1):
         idx = (255 - i) * 4
         rand_val = int.from_bytes(random_bytes[idx:idx + 4], "big")
@@ -60,10 +56,9 @@ def _substitution_table(sub_key: bytes) -> list[int]:
 
 
 def _transposition_order(trans_key: bytes, length: int) -> list[int]:
-    """Generates a CSPRNG-driven block permutation order."""
     order = list(range(length))
     random_bytes = _generate_csprng_bytes(trans_key, length * 4)
-    
+
     for i in range(length - 1, 0, -1):
         idx = (length - 1 - i) * 4
         rand_val = int.from_bytes(random_bytes[idx:idx + 4], "big")
@@ -74,7 +69,6 @@ def _transposition_order(trans_key: bytes, length: int) -> list[int]:
 
 def custom_encrypt(plaintext: str, password: str) -> str:
     salt = os.urandom(16)
-    # Derive 96 bytes: 32 enc_key, 32 mac_key, 16 sub_key, 16 trans_key
     derived = _derive_keys(password, salt, key_len=96)
     enc_key = derived[:32]
     mac_key = derived[32:64]
@@ -83,17 +77,14 @@ def custom_encrypt(plaintext: str, password: str) -> str:
 
     data = bytearray(plaintext.encode("utf-8"))
 
-    # Layer 1: Cryptographic Substitution
     sub_table = _substitution_table(sub_key)
     for i in range(len(data)):
         data[i] = sub_table[(data[i] + i) % 256]
 
-    # Layer 2: HMAC-SHA256 Keystream XOR
     keystream = _generate_csprng_bytes(enc_key, len(data))
     for i in range(len(data)):
         data[i] ^= keystream[i]
 
-    # Layer 3: CSPRNG Transposition
     block_size = 32
     order = _transposition_order(trans_key, block_size)
     shuffled = bytearray(len(data))
@@ -107,8 +98,7 @@ def custom_encrypt(plaintext: str, password: str) -> str:
         shuffled[start:start + n] = new_chunk
 
     raw_payload = MAGIC_HEADER + salt + bytes(shuffled)
-    
-    # Layer 4: Encrypt-then-MAC Authentication Tag (32 bytes)
+
     mac = hmac.new(mac_key, raw_payload, hashlib.sha256).digest()
     final_payload = raw_payload + mac
 
@@ -121,13 +111,12 @@ def custom_decrypt(ciphertext: str, password: str) -> str:
     except Exception as e:
         raise ValueError(f"Invalid ciphertext (not valid Base85): {e}")
 
-    if len(payload) < 4 + 16 + 32:  # Header + Salt + MAC
+    if len(payload) < 4 + 16 + 32:
         raise ValueError("Ciphertext is too short or corrupted.")
 
     if not payload.startswith(MAGIC_HEADER):
         raise ValueError("Invalid header - unsupported format or wrong script.")
 
-    # Extract MAC and verify integrity before processing
     mac_received = payload[-32:]
     raw_payload = payload[:-32]
     salt = raw_payload[4:20]
@@ -139,12 +128,10 @@ def custom_decrypt(ciphertext: str, password: str) -> str:
     sub_key = derived[64:80]
     trans_key = derived[80:96]
 
-    # Constant-time MAC comparison prevents timing attacks
     expected_mac = hmac.new(mac_key, raw_payload, hashlib.sha256).digest()
     if not hmac.compare_digest(mac_received, expected_mac):
         raise ValueError("Wrong password or tampered message (Authentication failed).")
 
-    # Undo Layer 3: CSPRNG Transposition
     block_size = 32
     order = _transposition_order(trans_key, block_size)
     unshuffled = bytearray(len(data))
@@ -158,12 +145,10 @@ def custom_decrypt(ciphertext: str, password: str) -> str:
         unshuffled[start:start + n] = new_chunk
     data = unshuffled
 
-    # Undo Layer 2: HMAC-SHA256 Keystream XOR
     keystream = _generate_csprng_bytes(enc_key, len(data))
     for i in range(len(data)):
         data[i] ^= keystream[i]
 
-    # Undo Layer 1: Substitution
     sub_table = _substitution_table(sub_key)
     inverse_table = [0] * 256
     for idx, val in enumerate(sub_table):
